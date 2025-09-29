@@ -28,7 +28,6 @@ type Block = frame_system::mocking::MockBlock<TestRuntime>;
 // We create the constants `ALICE` and `BOB` to make it clear when we are representing users below.
 const ALICE: u64 = 1;
 const BOB: u64 = 2;
-
 const DEFAULT_KITTY: Kitty<TestRuntime> = Kitty { dna: [0u8; 32], owner: 0 };
 
 #[runtime]
@@ -180,8 +179,7 @@ fn kitties_map_created_correctly() {
 	new_test_ext().execute_with(|| {
 		let zero_key = [0u8; 32];
 		assert!(!Kitties::<TestRuntime>::contains_key(zero_key));
-		let dummy_kitty = Kitty { dna: zero_key, owner: ALICE };
-		Kitties::<TestRuntime>::insert(zero_key, dummy_kitty);
+		Kitties::<TestRuntime>::insert(zero_key, DEFAULT_KITTY);
 		assert!(Kitties::<TestRuntime>::contains_key(zero_key));
 	})
 }
@@ -200,4 +198,64 @@ fn cannot_mint_duplicate_kitty() {
 		assert_ok!(PalletKitties::mint(ALICE, [0u8; 32]));
 		assert_noop!(PalletKitties::mint(BOB, [0u8; 32]), Error::<TestRuntime>::DuplicateKitty);
 	})
+}
+
+#[test]
+fn kitty_struct_has_expected_traits() {
+	new_test_ext().execute_with(|| {
+		let kitty = DEFAULT_KITTY;
+		let bytes = kitty.encode();
+		let _decoded_kitty = Kitty::<TestRuntime>::decode(&mut &bytes[..]).unwrap();
+		assert!(Kitty::<TestRuntime>::max_encoded_len() > 0);
+		let _info = Kitty::<TestRuntime>::type_info();
+	})
+}
+
+#[test]
+fn mint_stores_owner_in_kitty() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(PalletKitties::mint(1337, [42u8; 32]));
+		let kitty = Kitties::<TestRuntime>::get([42u8; 32]).unwrap();
+		assert_eq!(kitty.owner, 1337);
+		assert_eq!(kitty.dna, [42u8; 32]);
+	})
+}
+
+#[test]
+fn create_kitty_makes_unique_kitties() {
+	new_test_ext().execute_with(|| {
+		// Two calls to `create_kitty` should work.
+		assert_ok!(PalletKitties::create_kitty(RuntimeOrigin::signed(ALICE)));
+		assert_ok!(PalletKitties::create_kitty(RuntimeOrigin::signed(BOB)));
+		// And should result in two kitties in our system.
+		assert_eq!(CountForKitties::<TestRuntime>::get(), 2);
+		assert_eq!(Kitties::<TestRuntime>::iter().count(), 2);
+	})
+}
+
+#[test]
+fn kitties_owned_created_correctly() {
+	new_test_ext().execute_with(|| {
+		// Initially users have no kitties owned.
+		assert_eq!(KittiesOwned::<TestRuntime>::get(1).len(), 0);
+		// Let's create two kitties.
+		assert_ok!(PalletKitties::create_kitty(RuntimeOrigin::signed(ALICE)));
+		assert_ok!(PalletKitties::create_kitty(RuntimeOrigin::signed(ALICE)));
+		// Now they should have two kitties owned.
+		assert_eq!(KittiesOwned::<TestRuntime>::get(1).len(), 2);
+	});
+}
+
+#[test]
+fn cannot_own_too_many_kitties() {
+	new_test_ext().execute_with(|| {
+		// If your max owned is different than 100, you will need to update this.
+		for _ in 0..100 {
+			assert_ok!(PalletKitties::create_kitty(RuntimeOrigin::signed(ALICE)));
+		}
+		assert_noop!(
+			PalletKitties::create_kitty(RuntimeOrigin::signed(1)),
+			Error::<TestRuntime>::TooManyOwned
+		);
+	});
 }
