@@ -20,7 +20,7 @@ impl<T: Config> Pallet<T> {
 	}
 
 	pub fn mint(owner: T::AccountId, dna: [u8; 32]) -> DispatchResult {
-		let kitty = Kitty { dna, owner: owner.clone() };
+		let kitty = Kitty { dna, owner: owner.clone(), price: None };
 		// Check if the kitty does not already exist in our storage map
 		ensure!(!Kitties::<T>::contains_key(dna), Error::<T>::DuplicateKitty);
 
@@ -39,20 +39,21 @@ impl<T: Config> Pallet<T> {
 		ensure!(from != to, Error::<T>::TransferToSelf);
 		let mut kitty = Kitties::<T>::get(kitty_id).ok_or(Error::<T>::NoKitty)?;
 		ensure!(kitty.owner == from, Error::<T>::NotOwner);
-
 		kitty.owner = to.clone();
+		kitty.price = None;
+
 		let mut to_owned = KittiesOwned::<T>::get(&to);
-		_ = to_owned.try_push(kitty_id).map_err(|_| Error::<T>::TooManyOwned);
+		to_owned.try_push(kitty_id).map_err(|_| Error::<T>::TooManyOwned)?;
 		let mut from_owned = KittiesOwned::<T>::get(&from);
-		if let Some(index) = from_owned.iter().position(|&id| id == kitty_id) {
-			from_owned.swap_remove(index);
+		if let Some(ind) = from_owned.iter().position(|&id| id == kitty_id) {
+			from_owned.swap_remove(ind);
 		} else {
 			return Err(Error::<T>::NoKitty.into())
 		}
 
 		Kitties::<T>::insert(kitty_id, kitty);
-		KittiesOwned::<T>::insert(&to, &to_owned);
-		KittiesOwned::<T>::insert(&from, &from_owned);
+		KittiesOwned::<T>::insert(&to, to_owned);
+		KittiesOwned::<T>::insert(&from, from_owned);
 
 		Self::deposit_event(Event::<T>::Transferred { from, to, kitty_id });
 		Ok(())

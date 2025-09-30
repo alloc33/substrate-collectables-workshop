@@ -28,7 +28,7 @@ type Block = frame_system::mocking::MockBlock<TestRuntime>;
 // We create the constants `ALICE` and `BOB` to make it clear when we are representing users below.
 const ALICE: u64 = 1;
 const BOB: u64 = 2;
-const DEFAULT_KITTY: Kitty<TestRuntime> = Kitty { dna: [0u8; 32], owner: 0 };
+const DEFAULT_KITTY: Kitty<TestRuntime> = Kitty { dna: [0u8; 32], owner: 0, price: None };
 
 #[runtime]
 mod runtime {
@@ -81,6 +81,7 @@ impl pallet_balances::Config for TestRuntime {
 // will also need to update this configuration to represent that.
 impl pallet_kitties::Config for TestRuntime {
 	type RuntimeEvent = RuntimeEvent;
+	type NativeBalance = PalletBalances;
 }
 
 // We need to run most of our tests using this function: `new_test_ext().execute_with(|| { ... });`
@@ -257,5 +258,56 @@ fn cannot_own_too_many_kitties() {
 			PalletKitties::create_kitty(RuntimeOrigin::signed(1)),
 			Error::<TestRuntime>::TooManyOwned
 		);
+	});
+}
+
+#[test]
+fn transfer_emits_event() {
+	new_test_ext().execute_with(|| {
+		// We need to set block number to 1 to view events.
+		System::set_block_number(1);
+		// Create a kitty to transfer
+		assert_ok!(PalletKitties::create_kitty(RuntimeOrigin::signed(ALICE)));
+		// Get the kitty id.
+		let kitty_id = Kitties::<TestRuntime>::iter_keys().collect::<Vec<_>>()[0];
+		assert_ok!(PalletKitties::transfer(RuntimeOrigin::signed(ALICE), BOB, kitty_id));
+		System::assert_last_event(
+			Event::<TestRuntime>::Transferred { from: ALICE, to: BOB, kitty_id }.into(),
+		);
+	});
+}
+
+#[test]
+fn transfer_logic_works() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(PalletKitties::create_kitty(RuntimeOrigin::signed(ALICE)));
+		// Starting state looks good.
+		let kitty = &Kitties::<TestRuntime>::iter_values().collect::<Vec<_>>()[0];
+		let kitty_id = kitty.dna;
+		assert_eq!(kitty.owner, ALICE);
+		assert_eq!(KittiesOwned::<TestRuntime>::get(ALICE), vec![kitty_id]);
+		assert_eq!(KittiesOwned::<TestRuntime>::get(BOB), vec![]);
+		// Cannot transfer to yourself.
+		assert_noop!(
+			PalletKitties::transfer(RuntimeOrigin::signed(ALICE), ALICE, kitty_id),
+			Error::<TestRuntime>::TransferToSelf
+		);
+		// Cannot transfer a non-existent kitty.
+		assert_noop!(
+			PalletKitties::transfer(RuntimeOrigin::signed(ALICE), BOB, [0u8; 32]),
+			Error::<TestRuntime>::NoKitty
+		);
+		// Cannot transfer kitty you do not own.
+		assert_noop!(
+			PalletKitties::transfer(RuntimeOrigin::signed(BOB), ALICE, kitty_id),
+			Error::<TestRuntime>::NotOwner
+		);
+		// Transfer should work when parameters are right.
+		assert_ok!(PalletKitties::transfer(RuntimeOrigin::signed(ALICE), BOB, kitty_id));
+		// Storage is updated correctly.
+		assert_eq!(KittiesOwned::<TestRuntime>::get(ALICE), vec![]);
+		assert_eq!(KittiesOwned::<TestRuntime>::get(BOB), vec![kitty_id]);
+		let kitty = &Kitties::<TestRuntime>::iter_values().collect::<Vec<_>>()[0];
+		assert_eq!(kitty.owner, BOB);
 	});
 }
